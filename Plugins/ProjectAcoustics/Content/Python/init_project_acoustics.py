@@ -24,14 +24,14 @@ except ImportError:
     dialogText = "Project Acoustics is performing first run setup for required python dependencies. This may take a minute."
     with unreal.ScopedSlowTask(1, dialogText) as slow_task:
         slow_task.make_dialog(True)
-        pythonDir = os.__file__ + "/../.."
-        pythonExe = pythonDir + "/python.exe"
+        pythonDir = f"{os.__file__}/../.."
+        pythonExe = f"{pythonDir}/python.exe"
         CREATE_NO_WINDOW = 0x08000000
         call([pythonExe, '-m', 'pip', 'install', '--upgrade','pip', 'pythonnet'], creationflags=CREATE_NO_WINDOW)
         slow_task.enter_progress_frame(1)
     import clr
 
-from System import AppDomain, Convert, String 
+from System import AppDomain, Convert, String
 from System.Security.Cryptography import ProtectedData
 from System.Security.Cryptography import DataProtectionScope
 from System.Text import Encoding
@@ -45,8 +45,7 @@ def decrypt_azure_creds(creds_key):
     azure_creds_bytes = Convert.FromBase64String(creds_key)
     azure_creds_bytes_unprotected = ProtectedData.Unprotect(azure_creds_bytes, None, DataProtectionScope.CurrentUser)
     azure_creds_unprotected = Encoding.Unicode.GetString(azure_creds_bytes_unprotected)
-    json_decrypted = json.loads(azure_creds_unprotected)
-    return json_decrypted
+    return json.loads(azure_creds_unprotected)
 
 
 def encrypt_azure_creds(batch_key, storage_key, registry_key):
@@ -54,8 +53,7 @@ def encrypt_azure_creds(batch_key, storage_key, registry_key):
     json_encoded = json.dumps({'batch_key':batch_key, 'storage_key': storage_key, 'registry_key':registry_key})
     new_creds_bytes = Encoding.Unicode.GetBytes(json_encoded)
     new_creds_bytes_protected = ProtectedData.Protect(new_creds_bytes, None, DataProtectionScope.CurrentUser)
-    new_creds_protected = Convert.ToBase64String(new_creds_bytes_protected)
-    return new_creds_protected
+    return Convert.ToBase64String(new_creds_bytes_protected)
 
 
 def get_formatted_time(duration):
@@ -70,12 +68,10 @@ def get_formatted_time(duration):
 
 class AcousticsConfigSection(object):
     def __init__(self):
-        self.values = dict()
+        self.values = {}
 
     def __getitem__(self, key):
-        if key not in self.values:
-            return ''
-        return self.values[key]
+        return '' if key not in self.values else self.values[key]
 
     def __setitem__(self, key, value):
         self.values[key] = value
@@ -105,18 +101,20 @@ class AzureInformationConfig(AcousticsConfigSection):
         self.load(config)
 
     def load(self, config):
-        if config.has_section(AzureInformationConfig.azure_account_config_section):
-            azure_values = dict(config.items(AzureInformationConfig.azure_account_config_section))
+        if not config.has_section(
+            AzureInformationConfig.azure_account_config_section
+        ):
+            return
+        azure_values = dict(config.items(AzureInformationConfig.azure_account_config_section))
 
-            for key in azure_values.keys():
-                if key == AzureInformationConfig.azure_account_config_secret:
-                    encrypted_keys = azure_values[key]
-                    json_decrypted = decrypt_azure_creds(encrypted_keys)
-                    self.values[AzureInformationConfig.azure_account_config_batch_key] = json_decrypted[AzureInformationConfig.azure_account_config_batch_key]
-                    self.values[AzureInformationConfig.azure_account_config_storage_key] = json_decrypted[AzureInformationConfig.azure_account_config_storage_key]
-                    self.values[AzureInformationConfig.azure_container_registry_key] = json_decrypted[AzureInformationConfig.azure_container_registry_key]
-                else:
-                    self.values[key] = azure_values[key]
+        for key, encrypted_keys in azure_values.items():
+            if key == AzureInformationConfig.azure_account_config_secret:
+                json_decrypted = decrypt_azure_creds(encrypted_keys)
+                self.values[AzureInformationConfig.azure_account_config_batch_key] = json_decrypted[AzureInformationConfig.azure_account_config_batch_key]
+                self.values[AzureInformationConfig.azure_account_config_storage_key] = json_decrypted[AzureInformationConfig.azure_account_config_storage_key]
+                self.values[AzureInformationConfig.azure_container_registry_key] = json_decrypted[AzureInformationConfig.azure_container_registry_key]
+            else:
+                self.values[key] = azure_values[key]
 
 
     def save(self, config):
@@ -131,11 +129,18 @@ class AzureInformationConfig(AcousticsConfigSection):
         if AzureInformationConfig.azure_container_registry_key in values_copy:
             values_copy.pop(AzureInformationConfig.azure_container_registry_key, None)
 
-        if AzureInformationConfig.azure_account_config_batch_key in self.values and AzureInformationConfig.azure_account_config_storage_key in self.values:
-            if self.values[AzureInformationConfig.azure_account_config_batch_key] and self.values[AzureInformationConfig.azure_account_config_storage_key]:
-                encrypted_keys = encrypt_azure_creds(self.values[AzureInformationConfig.azure_account_config_batch_key], self.values[AzureInformationConfig.azure_account_config_storage_key], self.values[AzureInformationConfig.azure_container_registry_key])
-                values_copy[AzureInformationConfig.azure_account_config_secret] = encrypted_keys
-        
+        if (
+            AzureInformationConfig.azure_account_config_batch_key in self.values
+            and AzureInformationConfig.azure_account_config_storage_key
+            in self.values
+            and self.values[AzureInformationConfig.azure_account_config_batch_key]
+            and self.values[
+                AzureInformationConfig.azure_account_config_storage_key
+            ]
+        ):
+            encrypted_keys = encrypt_azure_creds(self.values[AzureInformationConfig.azure_account_config_batch_key], self.values[AzureInformationConfig.azure_account_config_storage_key], self.values[AzureInformationConfig.azure_container_registry_key])
+            values_copy[AzureInformationConfig.azure_account_config_secret] = encrypted_keys
+
         for key in values_copy.keys():
             config.set(AzureInformationConfig.azure_account_config_section, key, values_copy[key])
 
@@ -433,12 +438,12 @@ class OperationParametersConfig(AcousticsConfigSection):
 
     @property
     def level_prefix_map(self):
-        value = self.__getitem__(OperationParametersConfig.operational_parameters_level_prefix_map)
-        if (value):
+        if value := self.__getitem__(
+            OperationParametersConfig.operational_parameters_level_prefix_map
+        ):
             return json.loads(value)
-        # Return empty dictionary if missing config value 
         else:
-            return dict()
+            return {}
 
     @level_prefix_map.setter
     def level_prefix_map(self, value):
@@ -706,9 +711,7 @@ class AcousticsPythonBridgeImplmentation(unreal.AcousticsPythonBridge):
         self.save_configuration()
 
     def get_active_job_ace_filename(self):
-        if (not self.active_job_info):
-            return None
-        return self.active_job_info.prefix + ".ace"
+        return f"{self.active_job_info.prefix}.ace" if self.active_job_info else None
 
     def get_active_job_ace_filepath(self):
         if (not self.active_job_info):
@@ -763,33 +766,32 @@ class AcousticsPythonBridgeImplmentation(unreal.AcousticsPythonBridge):
 
     def check_for_submission_status(self):
         # Are we actively monitoring submit operation?
-        if (AcousticsPythonBridgeImplmentation.submit_monitor):
-            # Job submission still in progress
-            if (AcousticsPythonBridgeImplmentation.submit_monitor.Status == ThreadPoolOperationStatus.InProgress):
-                self.active_job_info.submit_pending = True
-                self.current_status.succeeded = True
-                self.current_status.message = 'Job submission in progress'
-            # If submit failed, clear the monitor and set failure status
-            elif (AcousticsPythonBridgeImplmentation.submit_monitor.Status == ThreadPoolOperationStatus.Failed):
-                AcousticsPythonBridgeImplmentation.submit_monitor = None
-                self.reset_active_job_info()
-                self.current_status.succeeded = False
-                self.current_status.message = 'Job submission failed, please ensure your Azure credentials are valid'
-            # Succeeded, save config and stop monitoring
-            else:
-                self.active_job_info.prefix = self.job_configuration.prefix
-                self.active_job_info.job_id = self.submit_monitor.Result
-                self.active_job_info.submit_time = str(datetime.datetime.now())
-                self.save_configuration()
-                self.active_job_info.submit_pending = False
-                AcousticsPythonBridgeImplmentation.submit_monitor = None
-                self.current_status.succeeded = True
-                self.current_status.message = 'Job submission succeeded'
-            # Return true to inform submission monitoring is active
-            return True
-        else:
+        if not AcousticsPythonBridgeImplmentation.submit_monitor:
             # Not monitoring job submission
             return False
+        # Job submission still in progress
+        if (AcousticsPythonBridgeImplmentation.submit_monitor.Status == ThreadPoolOperationStatus.InProgress):
+            self.active_job_info.submit_pending = True
+            self.current_status.succeeded = True
+            self.current_status.message = 'Job submission in progress'
+        # If submit failed, clear the monitor and set failure status
+        elif (AcousticsPythonBridgeImplmentation.submit_monitor.Status == ThreadPoolOperationStatus.Failed):
+            AcousticsPythonBridgeImplmentation.submit_monitor = None
+            self.reset_active_job_info()
+            self.current_status.succeeded = False
+            self.current_status.message = 'Job submission failed, please ensure your Azure credentials are valid'
+        # Succeeded, save config and stop monitoring
+        else:
+            self.active_job_info.prefix = self.job_configuration.prefix
+            self.active_job_info.job_id = self.submit_monitor.Result
+            self.active_job_info.submit_time = str(datetime.datetime.now())
+            self.save_configuration()
+            self.active_job_info.submit_pending = False
+            AcousticsPythonBridgeImplmentation.submit_monitor = None
+            self.current_status.succeeded = True
+            self.current_status.message = 'Job submission succeeded'
+        # Return true to inform submission monitoring is active
+        return True
 
 
     def check_for_download_ace_status(self):
